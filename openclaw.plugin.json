@@ -3,7 +3,39 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "agentPool": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Agent pool worker configuration.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable background agent pool worker."
+          },
+          "modelId": {
+            "type": "string",
+            "default": "claude-sonnet-4-6",
+            "description": "Model used to process assigned tasks."
+          },
+          "platform": {
+            "type": "string",
+            "enum": ["cli", "telegram", "feishu", "custom"],
+            "default": "cli",
+            "description": "Platform identifier reported to OpenMonopoly (for analytics)."
+          },
+          "webhookUrl": {
+            "type": "string",
+            "description": "Public HTTPS URL openclaw will receive work on (push mode). Omit to use pull mode."
+          },
+          "webhookSecret": {
+            "type": "string",
+            "description": "Shared secret to validate incoming webhook requests from OpenMonopoly."
+          }
+        }
+      }
+    }
   },
   "skills": [
     "./skills"
