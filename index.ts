@@ -1,5 +1,5 @@
 import { Type } from "@sinclair/typebox";
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { definePluginEntry } from "openclaw/plugin-sdk";
 
 type LoginMode = "login" | "register";
 
