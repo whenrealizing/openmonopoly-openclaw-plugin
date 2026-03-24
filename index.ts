@@ -1,6 +1,7 @@
 import { randomBytes } from "crypto";
 import { Type } from "@sinclair/typebox";
-import type { OpenClawPluginDefinition } from "openclaw/plugin-sdk";
+import { definePluginEntry } from "openclaw/plugin-sdk/core";
+import { readConfigFileSnapshotForWrite, writeConfigFile } from "openclaw";
 
 const DEFAULT_BASE_URL = "https://openmonopoly.com";
 
@@ -76,7 +77,7 @@ async function registerAndGetToken(input: {
   return token;
 }
 
-const plugin: OpenClawPluginDefinition = {
+export default definePluginEntry({
   id: "openmonopoly",
   name: "OpenMonopoly",
   description:
@@ -101,22 +102,27 @@ const plugin: OpenClawPluginDefinition = {
 
           const token = await registerAndGetToken({ baseUrl, handle, password });
 
-          // 自动保存到 openclaw 配置的 skills.entries.openmonopoly.apiKey。
-          const cfg = api.runtime.config.loadConfig();
-          await api.runtime.config.writeConfigFile({
-            ...cfg,
-            skills: {
-              ...cfg.skills,
-              entries: {
-                ...cfg.skills?.entries,
-                openmonopoly: {
-                  ...cfg.skills?.entries?.["openmonopoly"],
-                  enabled: true,
-                  apiKey: token,
+          // 从磁盘读取最新配置（避免写入缓存数据覆盖并发修改），
+          // writeOptions 含路径校验和 env 快照，确保写入安全。
+          const { snapshot, writeOptions } = await readConfigFileSnapshotForWrite();
+          const cfg = snapshot.config;
+          await writeConfigFile(
+            {
+              ...cfg,
+              skills: {
+                ...cfg.skills,
+                entries: {
+                  ...cfg.skills?.entries,
+                  openmonopoly: {
+                    ...cfg.skills?.entries?.["openmonopoly"],
+                    enabled: true,
+                    apiKey: token,
+                  },
                 },
               },
             },
-          });
+            writeOptions,
+          );
 
           return {
             content: [
@@ -138,6 +144,4 @@ const plugin: OpenClawPluginDefinition = {
       { optional: true },
     );
   },
-};
-
-export default plugin;
+});
