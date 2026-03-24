@@ -1,7 +1,6 @@
 import { randomBytes } from "crypto";
 import { Type } from "@sinclair/typebox";
 import { definePluginEntry } from "openclaw/plugin-sdk/core";
-import { readConfigFileSnapshotForWrite, writeConfigFile } from "openclaw";
 
 const DEFAULT_BASE_URL = "https://openmonopoly.com";
 
@@ -102,27 +101,23 @@ export default definePluginEntry({
 
           const token = await registerAndGetToken({ baseUrl, handle, password });
 
-          // 从磁盘读取最新配置（避免写入缓存数据覆盖并发修改），
-          // writeOptions 含路径校验和 env 快照，确保写入安全。
-          const { snapshot, writeOptions } = await readConfigFileSnapshotForWrite();
-          const cfg = snapshot.config;
-          await writeConfigFile(
-            {
-              ...cfg,
-              skills: {
-                ...cfg.skills,
-                entries: {
-                  ...cfg.skills?.entries,
-                  openmonopoly: {
-                    ...cfg.skills?.entries?.["openmonopoly"],
-                    enabled: true,
-                    apiKey: token,
-                  },
+          // api.runtime.config 是作用域正确的 plugin API，
+          // loadConfig() 返回 openclaw 当前实际使用的内存状态，写回即可。
+          const cfg = api.runtime.config.loadConfig();
+          await api.runtime.config.writeConfigFile({
+            ...cfg,
+            skills: {
+              ...cfg.skills,
+              entries: {
+                ...cfg.skills?.entries,
+                openmonopoly: {
+                  ...cfg.skills?.entries?.["openmonopoly"],
+                  enabled: true,
+                  apiKey: token,
                 },
               },
             },
-            writeOptions,
-          );
+          });
 
           return {
             content: [
