@@ -1,7 +1,8 @@
+import { randomBytes } from "crypto";
 import { Type } from "@sinclair/typebox";
 import { definePluginEntry } from "openclaw/plugin-sdk";
 
-type LoginMode = "login" | "register";
+const DEFAULT_BASE_URL = "https://openmonopoly.com";
 
 type LoginResponse = {
   data?: {
@@ -13,45 +14,49 @@ type LoginResponse = {
 };
 
 function normalizeBaseUrl(raw?: string): string {
-  const value = raw?.trim();
-  if (!value) {
-    throw new Error("缺少 OpenMonopoly baseUrl，无法发起认证请求。");
-  }
-
-  return value.replace(/\/+$/, "");
+  return (raw?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
 }
 
-async function requestOpenMonopolyToken(input: {
+function generateHandle(): string {
+  return "agent-" + randomBytes(5).toString("hex");
+}
+
+function generatePassword(): string {
+  // 大写 + 小写 + 数字 + 特殊字符，满足常见密码策略。
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghjkmnpqrstuvwxyz";
+  const digits = "23456789";
+  const special = "!@#$%^&*";
+  const all = upper + lower + digits + special;
+  const bytes = randomBytes(16);
+  let pwd =
+    upper[bytes[0] % upper.length] +
+    lower[bytes[1] % lower.length] +
+    digits[bytes[2] % digits.length] +
+    special[bytes[3] % special.length];
+  for (let i = 4; i < 16; i++) {
+    pwd += all[bytes[i] % all.length];
+  }
+  return pwd;
+}
+
+async function registerAndGetToken(input: {
   baseUrl: string;
-  mode: LoginMode;
   handle: string;
   password: string;
-  profileName?: string;
 }): Promise<string> {
-  const endpoint =
-    input.mode === "register"
-      ? `${input.baseUrl}/api/auth/register?mode=token`
-      : `${input.baseUrl}/api/auth/login?mode=token`;
-
-  const payload =
-    input.mode === "register"
-      ? {
-          handle: input.handle,
-          password: input.password,
-          profileName: input.profileName || input.handle,
-        }
-      : {
-          handle: input.handle,
-          password: input.password,
-        };
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
+  const response = await fetch(
+    `${input.baseUrl}/api/auth/register?mode=token`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        handle: input.handle,
+        password: input.password,
+        profileName: input.handle,
+      }),
     },
-    body: JSON.stringify(payload),
-  });
+  );
 
   let body: LoginResponse | null = null;
   try {
@@ -62,8 +67,10 @@ async function requestOpenMonopolyToken(input: {
 
   const token = body?.data?.token;
   if (!response.ok || !token) {
-    const reason = body?.error?.message || `HTTP ${response.status}`;
-    throw new Error(`OpenMonopoly 认证失败：${reason}`);
+    const reason =
+      (body as { error?: { message?: string } })?.error?.message ||
+      `HTTP ${response.status}`;
+    throw new Error(`OpenMonopoly 注册失败：${reason}`);
   }
 
   return token;
@@ -72,44 +79,29 @@ async function requestOpenMonopolyToken(input: {
 export default definePluginEntry({
   id: "openmonopoly",
   name: "OpenMonopoly",
-  description: "Ship OpenMonopoly skills and a login tool that automatically saves the token to OpenClaw auth profiles.",
+  description:
+    "Ship OpenMonopoly skills and a registration tool that auto-creates an account and saves the token.",
   register(api) {
     api.registerTool(
       {
-        name: "openmonopoly_login",
+        name: "openmonopoly_register",
         description:
-          "Login or register with OpenMonopoly. Automatically saves the token to OpenClaw — no manual config needed.",
+          "Auto-create an OpenMonopoly account with a generated handle and password, then save the token automatically. No user input needed.",
         parameters: Type.Object({
-          baseUrl: Type.String({
-            description:
-              "OpenMonopoly API base URL, for example https://openmonopoly.example.com",
-          }),
-          mode: Type.Union([Type.Literal("login"), Type.Literal("register")], {
-            description: "Use login for existing users and register for new users.",
-          }),
-          handle: Type.String({
-            description: "OpenMonopoly handle.",
-          }),
-          password: Type.String({
-            description: "OpenMonopoly password.",
-          }),
-          profileName: Type.Optional(
+          baseUrl: Type.Optional(
             Type.String({
-              description: "Profile name used only when mode=register.",
+              description: `OpenMonopoly API base URL. Defaults to ${DEFAULT_BASE_URL}.`,
             }),
           ),
         }),
         async execute(_id, params) {
           const baseUrl = normalizeBaseUrl(params.baseUrl);
-          const token = await requestOpenMonopolyToken({
-            baseUrl,
-            mode: params.mode,
-            handle: params.handle,
-            password: params.password,
-            profileName: params.profileName,
-          });
+          const handle = generateHandle();
+          const password = generatePassword();
 
-          // 自动保存到 openclaw 加密凭证存储，用户无需手动粘贴配置。
+          const token = await registerAndGetToken({ baseUrl, handle, password });
+
+          // 自动保存到 openclaw 加密凭证存储。
           api.runtime.upsertAuthProfile({
             provider: "openmonopoly",
             authMethod: "token",
@@ -121,9 +113,12 @@ export default definePluginEntry({
               {
                 type: "text",
                 text: [
-                  `OpenMonopoly 认证成功（handle: "${params.handle}"）。`,
-                  `Token 已自动保存，无需手动配置。`,
-                  `Base URL: ${baseUrl}`,
+                  "OpenMonopoly 账号注册成功，token 已自动保存。",
+                  "",
+                  "请妥善保存以下凭证（用于登录 OpenMonopoly 网站或找回账号）：",
+                  `Handle：${handle}`,
+                  `Password：${password}`,
+                  `Base URL：${baseUrl}`,
                 ].join("\n"),
               },
             ],
