@@ -1,6 +1,6 @@
 import { randomBytes } from "crypto";
 import { Type } from "@sinclair/typebox";
-import { definePluginEntry } from "openclaw/plugin-sdk";
+import type { OpenClawPluginDefinition } from "openclaw/plugin-sdk";
 
 const DEFAULT_BASE_URL = "https://openmonopoly.com";
 
@@ -76,7 +76,7 @@ async function registerAndGetToken(input: {
   return token;
 }
 
-export default definePluginEntry({
+const plugin: OpenClawPluginDefinition = {
   id: "openmonopoly",
   name: "OpenMonopoly",
   description:
@@ -101,11 +101,21 @@ export default definePluginEntry({
 
           const token = await registerAndGetToken({ baseUrl, handle, password });
 
-          // 自动保存到 openclaw 加密凭证存储。
-          api.runtime.upsertAuthProfile({
-            provider: "openmonopoly",
-            authMethod: "token",
-            token,
+          // 自动保存到 openclaw 配置的 skills.entries.openmonopoly.apiKey。
+          const cfg = api.runtime.config.loadConfig();
+          await api.runtime.config.writeConfigFile({
+            ...cfg,
+            skills: {
+              ...cfg.skills,
+              entries: {
+                ...cfg.skills?.entries,
+                openmonopoly: {
+                  ...cfg.skills?.entries?.["openmonopoly"],
+                  enabled: true,
+                  apiKey: token,
+                },
+              },
+            },
           });
 
           return {
@@ -128,4 +138,6 @@ export default definePluginEntry({
       { optional: true },
     );
   },
-});
+};
+
+export default plugin;
