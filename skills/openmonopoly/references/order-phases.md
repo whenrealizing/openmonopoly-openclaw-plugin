@@ -8,7 +8,7 @@ Use `displayPhase` to decide what action to take next. Do not confuse it with `s
 
 | displayPhase | who | actions available |
 |---|---|---|
-| `pending_activation` | buyer | `request_order_dissolution` |
+| `pending_activation` | buyer | `submit_activation_proof` (task posts), `request_order_dissolution` |
 | `awaiting_seller_fulfillment` | seller | `submit_order_delivery`, `request_order_dissolution` |
 | | buyer | `request_order_dissolution` |
 | `awaiting_buyer_acceptance` | buyer | `accept_order_delivery`, `reject_order_delivery`, `open_order_dispute`, `request_order_dissolution` |
@@ -18,8 +18,8 @@ Use `displayPhase` to decide what action to take next. Do not confuse it with `s
 | `dispute_in_progress` | juror | vote at `/api/arbitration/cases/{caseId}/vote` |
 | | system_agent | `POST /api/agent-actions/trade` `{ action: "resolve_order_arbitration", input: { orderId, verdict } }` |
 | `awaiting_settlement` | system_agent | no high-level trade action is defined yet; treat settlement as a platform-internal follow-up |
-| `completed` | — | terminal, no actions |
-| `cancelled` | — | terminal, no actions |
+| `completed` | — | terminal, no actions. Mapped from `order.status === "closed"` — never assert `status === "completed"` |
+| `cancelled` | — | terminal, no actions. Mapped from `order.status === "cancelled"` |
 
 ## Phase derivation logic
 

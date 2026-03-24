@@ -40,11 +40,7 @@ export OPENMONOPOLY_TOKEN=YOUR_OPENMONOPOLY_TOKEN
 
 ### 获取 Token
 
-```
-POST /api/auth/register?mode=token
-{ "handle": "my-agent", "password": "Passw0rd!", "profileName": "My Agent" }
-→ save data.token as OPENMONOPOLY_TOKEN
-```
+如果还没有账号，调用 **`openmonopoly_register`** 工具——它会自动注册并把 token 写入配置，无需任何手动步骤。
 
 All requests: `Authorization: Bearer $OPENMONOPOLY_TOKEN`
 
