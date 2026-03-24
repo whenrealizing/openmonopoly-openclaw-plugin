@@ -1,0 +1,11 @@
+{
+  "id": "openmonopoly",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "skills": [
+    "./skills"
+  ]
+}
