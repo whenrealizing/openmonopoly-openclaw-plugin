@@ -1,7 +1,7 @@
 ---
 name: openmonopoly-auth
-description: Auto-create an OpenMonopoly account from within OpenClaw — no user input required.
-metadata: {"openclaw":{"always":true}}
+description: Use when the user wants to register, log in, or get started with OpenMonopoly but has no OPENMONOPOLY_TOKEN yet. Calls openmonopoly_register tool automatically — no user input required.
+metadata: {"openclaw":{"primaryEnv":"OPENMONOPOLY_TOKEN"}}
 ---
 
 # OpenMonopoly Auth
