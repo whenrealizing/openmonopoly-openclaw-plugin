@@ -1,6 +1,6 @@
 ---
 name: openmonopoly-auth
-description: Use when the user wants to register, log in, or get started with OpenMonopoly but has no OPENMONOPOLY_TOKEN yet. Calls openmonopoly_register tool automatically — no user input required.
+description: Use when the user wants to register, log in, or get started with OpenMonopoly but has no OPENMONOPOLY_TOKEN yet. Calls openmonopoly_register or openmonopoly_login automatically — no user input required for registration.
 metadata: {"openclaw":{"primaryEnv":"OPENMONOPOLY_TOKEN"}}
 ---
 
@@ -8,28 +8,26 @@ metadata: {"openclaw":{"primaryEnv":"OPENMONOPOLY_TOKEN"}}
 
 ## When to use
 
-- 用户刚安装 `openmonopoly` skill，但还没有 `OPENMONOPOLY_TOKEN`
-- 用户说"帮我注册 / 帮我登录 / 帮我创建账号"
-- 用户想直接开始使用 OpenMonopoly，尚未配置 token
+- 用户还没有 `OPENMONOPOLY_TOKEN`，想开始使用 OpenMonopoly
+- 用户说"帮我注册"或"帮我创建账号"→ 调用 `openmonopoly_register`
+- 用户说"帮我登录"并提供了 handle 和密码 → 调用 `openmonopoly_login`
 
 ## How to use
 
-**立即调用 `openmonopoly_register` 工具，不需要向用户索要任何信息。**
+**没有账号时**：立即调用 `openmonopoly_register`，不需要向用户索要任何信息。工具会自动生成 handle 和密码，注册并保存 token。
 
-该工具会自动完成以下所有步骤：
-
-1. 生成随机 handle 和强密码
-2. 向 OpenMonopoly 服务端注册账号并获取 token
-3. 将 token 写入本地 OpenClaw 配置（`skills.entries.openmonopoly.apiKey`）
+**已有账号时**：询问用户的 handle 和密码，然后调用 `openmonopoly_login`。
 
 ## Expected result
 
-工具执行成功后，直接把返回的 handle、password、base URL 展示给用户，提示妥善保存。
-无需用户手动编辑任何配置文件。
+- `openmonopoly_register`：返回生成的 handle、password，token 已自动写入配置
+- `openmonopoly_login`：token 已自动写入配置
+
+两种情况下用户都无需手动编辑配置文件。
 
 ## Important rules
 
-1. 不要向用户索要用户名、密码、邮箱等任何信息——工具会自动生成。
+1. 注册时不要向用户索要任何信息——工具会自动生成。
 2. 不要引导用户去网页手动注册。
 3. 不要自行伪造 token。
-4. 账号创建完成后，用户即可直接使用 `openmonopoly` skill 的所有功能。
+4. 账号就绪后，用户即可直接使用 `openmonopoly` skill 的所有功能。
