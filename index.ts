@@ -106,38 +106,131 @@ async function saveToken(api: PluginApi, token: string): Promise<void> {
   });
 }
 
+/**
+ * 根据 workType 生成 subagent 完整指令。
+ *
+ * subagent 负责：处理任务 + 调用 POST /api/agent-pool/work-result 提交结果。
+ * 插件只在 subagent 运行失败时兜底提交 { status: "failed" }。
+ */
+function buildWorkMessage(
+  work: PendingWork,
+  session: { sessionId: string; token: string; baseUrl: string },
+): string {
+  const { sessionId, token, baseUrl } = session;
+
+  // workType 专属结果格式说明
+  const resultSchemaByType: Record<string, { example: unknown; description: string }> = {
+    task_post: {
+      example: {
+        note: "交付内容说明",
+        artifacts: [{ uri: "https://assets.openmonopoly.com/file.pdf", hash: "sha256:..." }],
+      },
+      description:
+        'note（string）：交付说明。artifacts（可选）：交付文件列表，每项含 uri 和 hash（sha256:前缀）。artifacts 为空数组时可省略。',
+    },
+    arbitration: {
+      example: { verdict: "buyer_win", rationale: "详细裁决理由" },
+      description:
+        'verdict 必填，枚举值：buyer_win | seller_win | split。rationale 必填，详细说明裁决依据。',
+    },
+    arbitration_vote: {
+      example: { verdict: "buyer_win", reason: "投票理由（可选）" },
+      description:
+        'verdict 必填，枚举值：buyer_win | seller_win | split。reason 可选。',
+    },
+  };
+
+  const schema = resultSchemaByType[work.workType] ?? {
+    example: { note: "completed" },
+    description: "未知 workType，提交任意 JSON 作为结果。",
+  };
+
+  const successBody = JSON.stringify(
+    { sessionId, workId: work.workId, status: "done", result: schema.example },
+    null,
+    2,
+  );
+  const failBody = JSON.stringify(
+    { sessionId, workId: work.workId, status: "failed" },
+    null,
+    2,
+  );
+
+  const parts: string[] = [
+    work.prompt,
+    "",
+    "---",
+    `【任务元数据】`,
+    `workType: ${work.workType}`,
+    `workId: ${work.workId}`,
+  ];
+
+  if (work.capabilities) {
+    parts.push(
+      "",
+      "【可用 API 能力】",
+      JSON.stringify(work.capabilities, null, 2),
+    );
+  }
+
+  if (Object.keys(work.context).length > 0) {
+    parts.push(
+      "",
+      "【业务上下文】",
+      JSON.stringify(work.context, null, 2),
+    );
+  }
+
+  parts.push(
+    "",
+    "【完成后提交结果】",
+    `POST ${baseUrl}/api/agent-pool/work-result`,
+    `Authorization: Bearer ${token}`,
+    `Content-Type: application/json`,
+    "",
+    "成功时的请求体（result 字段说明：" + schema.description + "）：",
+    successBody,
+    "",
+    "无法完成时提交：",
+    failBody,
+    "",
+    "【重要】必须在完成任务后主动调用上述接口提交结果，否则任务不会被标记为完成。",
+  );
+
+  return parts.join("\n");
+}
+
 async function processWork(
   work: PendingWork,
   session: { sessionId: string; token: string; baseUrl: string },
   api: PluginApi,
   modelId: string,
 ): Promise<void> {
-  const { sessionId, token, baseUrl } = session;
   try {
     const { runId } = await api.runtime.subagent.run({
       sessionKey: `openmonopoly-work-${work.workId}`,
-      message: work.prompt,
+      message: buildWorkMessage(work, session),
       model: modelId,
     });
     const result = await api.runtime.subagent.waitForRun({
       runId,
       timeoutMs: 120_000,
     });
-    await apiPost(
-      `${baseUrl}/api/agent-pool/work-result`,
-      {
-        sessionId,
-        workId: work.workId,
-        status: result.status === "ok" ? "done" : "failed",
-        result: { note: result.error ?? "completed" },
-      },
-      token,
-    );
+
+    if (result.status !== "ok") {
+      // subagent 本身失败（超时、错误），兜底提交 failed
+      await apiPost(
+        `${session.baseUrl}/api/agent-pool/work-result`,
+        { sessionId: session.sessionId, workId: work.workId, status: "failed" },
+        session.token,
+      );
+    }
+    // status === "ok" 时，subagent 已在任务内调用 work-result 接口，无需再提交
   } catch {
     await apiPost(
-      `${baseUrl}/api/agent-pool/work-result`,
-      { sessionId, workId: work.workId, status: "failed" },
-      token,
+      `${session.baseUrl}/api/agent-pool/work-result`,
+      { sessionId: session.sessionId, workId: work.workId, status: "failed" },
+      session.token,
     ).catch(() => {});
   }
 }
@@ -221,6 +314,7 @@ export default definePluginEntry({
             `${baseUrl}/api/auth/login?mode=token`,
             { handle: params.handle, password: params.password },
           );
+          // login 返回 data.sessionToken，与 register 的 data.token 不同
           const token = body.data?.["sessionToken"] as string | undefined;
           if (!token) throw new Error("OpenMonopoly 登录失败：响应中无 sessionToken");
           await saveToken(api, token);
@@ -246,7 +340,6 @@ export default definePluginEntry({
         path: "/openmonopoly/work",
         auth: "plugin",
         handler: async (req: IncomingMessage, res: ServerResponse) => {
-          // 快速读取 body
           const raw = await new Promise<string>((resolve, reject) => {
             let data = "";
             req.on("data", (chunk: Buffer) => { data += chunk.toString(); });
@@ -254,7 +347,6 @@ export default definePluginEntry({
             req.on("error", reject);
           });
 
-          // 校验 secret
           const incomingSecret = (req.headers["x-openmonopoly-secret"] as string) ?? "";
           if (poolCfg.webhookSecret && incomingSecret !== poolCfg.webhookSecret) {
             res.writeHead(401).end("Unauthorized");
@@ -279,7 +371,7 @@ export default definePluginEntry({
       });
     }
 
-    // ── 后台 Service（pull 模式 + 连接管理） ─────────────────────
+    // ── 后台 Service ─────────────────────────────────────────────
 
     api.registerService({
       id: "openmonopoly-pool-worker",
@@ -287,7 +379,10 @@ export default definePluginEntry({
       async start(ctx) {
         if (!poolCfg.enabled) return;
 
-        const token = api.config.skills?.entries?.["openmonopoly"]?.apiKey as string | undefined;
+        // 用 loadConfig() 读运行时最新配置，避免 api.config 快照过期
+        const token = api.runtime.config.loadConfig()
+          .skills?.entries?.["openmonopoly"]?.apiKey as string | undefined;
+
         if (!token) {
           ctx.logger.warn("openmonopoly-pool-worker: 未找到 OPENMONOPOLY_TOKEN，跳过启动");
           return;
@@ -312,11 +407,12 @@ export default definePluginEntry({
             const sessionId = await connectToPool(token, baseUrl, platform, webhookUrl);
             activeSession = { sessionId, token, baseUrl };
             retryDelay = 2_000;
-            ctx.logger.info(`openmonopoly-pool-worker: 已连接 session=${sessionId} mode=${isPushMode ? "push" : "pull"}`);
+            ctx.logger.info(
+              `openmonopoly-pool-worker: 已连接 session=${sessionId} mode=${isPushMode ? "push" : "pull"}`,
+            );
 
             if (isPushMode) {
-              // push 模式：只需保持 session 存活，工作由 webhook 路由处理
-              // wait-for-work 充当心跳（每 30s 一次）
+              // push 模式：循环调 wait-for-work 充当心跳，实际工作由 webhook 路由处理
               while (true) {
                 await apiPost(
                   `${baseUrl}/api/composite/agent-pool/wait-for-work`,
@@ -340,7 +436,10 @@ export default definePluginEntry({
             }
           } catch (err) {
             activeSession = null;
-            ctx.logger.warn(`openmonopoly-pool-worker: 断线，${retryDelay}ms 后重连`, { err });
+            ctx.logger.warn(
+              `openmonopoly-pool-worker: 断线，${retryDelay}ms 后重连`,
+              { err },
+            );
             await sleep(retryDelay);
             retryDelay = Math.min(retryDelay * 2, 60_000);
           }
@@ -351,7 +450,6 @@ export default definePluginEntry({
         const session = activeSession;
         activeSession = null;
         if (!session) return;
-        // 干净断开，服务端立即标记 offline
         await apiPost(
           `${session.baseUrl}/api/agent-pool/disconnect`,
           { sessionId: session.sessionId },
