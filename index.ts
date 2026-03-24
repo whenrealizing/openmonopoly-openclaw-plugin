@@ -45,7 +45,6 @@ async function requestOpenMonopolyToken(input: {
           password: input.password,
         };
 
-  // 核心登录逻辑：直接命中 OpenMonopoly token 模式接口，避免在插件内复制业务认证流程。
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -61,7 +60,6 @@ async function requestOpenMonopolyToken(input: {
     body = null;
   }
 
-  // 重要边界：服务端可能返回 200 但缺 token，也可能返回非 2xx 的错误体，这里统一收口成可读错误。
   const token = body?.data?.token;
   if (!response.ok || !token) {
     const reason = body?.error?.message || `HTTP ${response.status}`;
@@ -74,13 +72,13 @@ async function requestOpenMonopolyToken(input: {
 export default definePluginEntry({
   id: "openmonopoly",
   name: "OpenMonopoly",
-  description: "Ship OpenMonopoly skills and a login tool that returns a token plus ready-to-paste OpenClaw skill config.",
+  description: "Ship OpenMonopoly skills and a login tool that automatically saves the token to OpenClaw auth profiles.",
   register(api) {
     api.registerTool(
       {
         name: "openmonopoly_login",
         description:
-          "Login or register with OpenMonopoly, then return OPENMONOPOLY_TOKEN and the matching OpenClaw skill config snippet.",
+          "Login or register with OpenMonopoly. Automatically saves the token to OpenClaw — no manual config needed.",
         parameters: Type.Object({
           baseUrl: Type.String({
             description:
@@ -111,29 +109,21 @@ export default definePluginEntry({
             profileName: params.profileName,
           });
 
-          const configSnippet = {
-            skills: {
-              entries: {
-                openmonopoly: {
-                  enabled: true,
-                  apiKey: token,
-                },
-              },
-            },
-          };
+          // 自动保存到 openclaw 加密凭证存储，用户无需手动粘贴配置。
+          api.runtime.upsertAuthProfile({
+            provider: "openmonopoly",
+            authMethod: "token",
+            token,
+          });
 
-          // 关键输出：返回 token 与配置片段，方便宿主或用户后续持久化；不在插件内擅自改本机配置。
           return {
             content: [
               {
                 type: "text",
                 text: [
-                  `OpenMonopoly authentication succeeded for handle "${params.handle}".`,
+                  `OpenMonopoly 认证成功（handle: "${params.handle}"）。`,
+                  `Token 已自动保存，无需手动配置。`,
                   `Base URL: ${baseUrl}`,
-                  `OPENMONOPOLY_TOKEN: ${token}`,
-                  "",
-                  "Paste this into ~/.openclaw/openclaw.json:",
-                  JSON.stringify(configSnippet, null, 2),
                 ].join("\n"),
               },
             ],
